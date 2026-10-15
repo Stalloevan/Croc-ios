@@ -21,7 +21,14 @@ jobs:
       - name: Build Croc.xcframework
         env:
           GOTOOLCHAIN: auto
-        run: ./scripts/build-croc-framework.sh
+        shell: bash
+        run: |
+          mkdir -p build
+          if ! ./scripts/build-croc-framework.sh > build/framework.log 2>&1; then
+            msg=$(tail -n 40 build/framework.log | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=framework build failed::${msg}"
+            exit 1
+          fi
 
       - name: Generate Xcode project
         run: |
@@ -30,6 +37,8 @@ jobs:
 
       - name: Build unsigned archive
         run: |
+          mkdir -p build
+          set -o pipefail
           xcodebuild archive \
             -project CrocApp.xcodeproj \
             -scheme CrocApp \
@@ -37,7 +46,11 @@ jobs:
             -destination 'generic/platform=iOS' \
             -archivePath build/CrocApp.xcarchive \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
-            | tee build/xcodebuild.log | tail -n 50
+            > build/xcodebuild.log 2>&1 || {
+            msg=$(grep -E "error:|\*\* ARCHIVE FAILED" build/xcodebuild.log | head -n 25 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=xcodebuild failed::${msg}"
+            exit 1
+          }
         shell: bash
 
       - name: Package IPA
