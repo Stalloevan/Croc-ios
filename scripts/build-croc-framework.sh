@@ -17,6 +17,8 @@ gomobile init
 
 echo "Fetching croc (latest v11 release)..."
 go get github.com/schollz/croc/v11@latest
+go get -tool golang.org/x/mobile/cmd/gobind
+go get golang.org/x/mobile/bind
 go mod tidy
 
 mkdir -p "$ROOT/Frameworks"
