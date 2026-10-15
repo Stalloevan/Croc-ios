@@ -56,14 +56,15 @@ struct SendView: View {
                 StatusSection()
             }
             .navigationTitle("Send")
-            .fileImporter(
-                isPresented: $showingImporter,
-                allowedContentTypes: [.item],
-                allowsMultipleSelection: true
-            ) { result in
-                if case .success(let urls) = result {
-                    model.addFiles(urls)
-                }
+            .sheet(isPresented: $showingImporter) {
+                DocumentPicker(
+                    onPick: { urls in
+                        showingImporter = false
+                        model.addFiles(urls)
+                    },
+                    onCancel: { showingImporter = false }
+                )
+                .ignoresSafeArea()
             }
         }
     }

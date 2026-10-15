@@ -5,12 +5,37 @@ on:
     branches: [main]
   workflow_dispatch:
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: macos-15
     timeout-minutes: 60
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
+
+      # Version is YY.MMDD.N (US Eastern date); N counts releases made that day.
+      - name: Compute version
+        shell: bash
+        run: |
+          prefix=$(TZ=America/New_York date +%y.%m%d)
+          n=1
+          while git ls-remote --exit-code --tags origin "refs/tags/${prefix}.${n}" >/dev/null 2>&1; do
+            n=$((n + 1))
+          done
+          echo "VERSION=${prefix}.${n}" >> "$GITHUB_ENV"
+          echo "Release version: ${prefix}.${n}"
+
+      - name: Stamp app version
+        shell: bash
+        run: |
+          sed -i '' "s/CFBundleShortVersionString: \"0.1.0\"/CFBundleShortVersionString: \"${VERSION}\"/" project.yml
+          sed -i '' "s/CFBundleVersion: \"1\"/CFBundleVersion: \"${{ github.run_number }}\"/" project.yml
+          grep -n "Version" project.yml
 
       - uses: actions/setup-go@v5
         with:
@@ -64,6 +89,17 @@ jobs:
         with:
           name: Croc-unsigned-ipa
           path: build/Croc-unsigned.ipa
+
+      - name: Publish GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp build/Croc-unsigned.ipa "build/Croc-${VERSION}-unsigned.ipa"
+          gh release create "${VERSION}" "build/Croc-${VERSION}-unsigned.ipa" \
+            --title "${VERSION}" \
+            --target "${GITHUB_SHA}" \
+            --generate-notes
 
       - uses: actions/upload-artifact@v4
         if: failure()
