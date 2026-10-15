@@ -8,17 +8,24 @@ enum CrocBridge {
     static let defaultRelay = "croc.schollz.com:9009"
 
     static func generateCode() throws -> String {
-        try CrocmobileGenerateCode()
+        var err: NSError?
+        let code = CrocmobileGenerateCode(&err)
+        if let err { throw err }
+        return code
     }
 
     /// Sends the given local files. Blocks until the transfer ends, so call it off the main thread.
     static func send(files: [URL], code: String, relay: String, relayPassword: String) throws {
         let paths = files.map { $0.path }.joined(separator: "\n")
-        try CrocmobileSend(paths, code, relay, relayPassword)
+        var err: NSError?
+        CrocmobileSend(paths, code, relay, relayPassword, &err)
+        if let err { throw err }
     }
 
     /// Receives files into `destination`. Blocks until the transfer ends, so call it off the main thread.
     static func receive(code: String, relay: String, relayPassword: String, destination: URL) throws {
-        try CrocmobileReceive(code, relay, relayPassword, destination.path)
+        var err: NSError?
+        CrocmobileReceive(code, relay, relayPassword, destination.path, &err)
+        if let err { throw err }
     }
 }
