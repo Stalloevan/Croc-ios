@@ -1,0 +1,11 @@
+# Xcode / XcodeGen output
+*.xcodeproj
+DerivedData/
+xcuserdata/
+*.xcuserstate
+
+# Built framework (rebuild with scripts/build-croc-framework.sh)
+Frameworks/
+
+# macOS
+.DS_Store

@@ -1,0 +1,29 @@
+# XcodeGen spec. Run `xcodegen generate` on a Mac to create CrocApp.xcodeproj.
+name: CrocApp
+options:
+  bundleIdPrefix: com.stalloevan
+  deploymentTarget:
+    iOS: "17.0"
+targets:
+  CrocApp:
+    type: application
+    platform: iOS
+    sources:
+      - CrocApp
+    dependencies:
+      - framework: Frameworks/Croc.xcframework
+        embed: true
+    info:
+      path: CrocApp/Info.plist
+      properties:
+        CFBundleDisplayName: Croc
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        UILaunchScreen: {}
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+        ITSAppUsesNonExemptEncryption: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.stalloevan.croc
+        SWIFT_VERSION: "5.9"
