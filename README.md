@@ -42,12 +42,13 @@ later builds are reproducible.
 
 ## Using the app
 
-- **Send:** tap *Add files…*, pick files, then tap *Send*. Give the code shown on
-  screen to the receiver. Keep the app open until the transfer finishes.
-- **Receive:** type the code from the sender and tap *Receive*. Files are saved to
-  the app's *Received* folder, visible in the Files app under *Croc*.
-- **Settings:** change the relay (`host:port`) and password. Both sides must use
-  the same relay. The default is the public relay `croc.schollz.com:9009`.
+- **Send:** switch to *Send*, tap *Add files*, then *Snap it over*. Give the swamp
+  code (copy or share it) to the receiver and keep the app open until it finishes.
+- **Receive:** switch to *Receive*, paste the swamp code, tap *Chomp it down*. Files
+  are saved to the *Received* folder (Files app → Croc); *Show in Files* opens it.
+- **Swamp settings** (gear button): change the relay (`host:port`) and password.
+  Both sides must use the same relay. The default is the public relay
+  `croc.schollz.com:9009`, whose password (`pass123`) is used when none is set.
 
 ## Known limitations (first version)
 

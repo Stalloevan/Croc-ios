@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 /// Holds app state and runs transfers. Heavy work runs on a background task;
 /// UI-facing state is only touched on the main actor.
@@ -20,7 +21,11 @@ final class TransferModel: ObservableObject {
     @Published var selectedFiles: [URL] = []
     @Published var sendCode: String = ""
     @Published var receiveCode: String = ""
-    @Published var relay: String = CrocBridge.defaultRelay
+    @Published var canShowReceived = false
+    /// Remembered between launches. The password is kept for the session only.
+    @Published var relay: String {
+        didSet { UserDefaults.standard.set(relay, forKey: "relay") }
+    }
     @Published var relayPassword: String = ""
 
     /// Received files are saved here and appear under "On My iPhone > Croc" in the Files app.
@@ -30,7 +35,21 @@ final class TransferModel: ObservableObject {
     }
 
     init() {
+        relay = UserDefaults.standard.string(forKey: "relay") ?? CrocBridge.defaultRelay
         regenerateCode()
+    }
+
+    func resetSettings() {
+        relay = CrocBridge.defaultRelay
+        relayPassword = ""
+    }
+
+    /// Opens the received-files folder in the Files app.
+    func showReceivedFolder() {
+        let path = receiveFolder.path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? receiveFolder.path
+        if let url = URL(string: "shareddocuments://" + path) {
+            UIApplication.shared.open(url)
+        }
     }
 
     func regenerateCode() {
@@ -84,14 +103,14 @@ final class TransferModel: ObservableObject {
         let code = sendCode
         let relayAddress = self.relay
         let password = relayPassword
-        status = .working("Waiting for the receiver to enter the code…")
+        status = .working("Waiting for the receiver to snap on…")
 
         Task.detached(priority: .userInitiated) {
             do {
                 try CrocBridge.send(files: files, code: code, relay: relayAddress, relayPassword: password)
-                await self.finish(.success("Sent \(files.count) item(s)."))
+                await self.finish(.success("Snap! \(files.count) item(s) delivered."), received: false)
             } catch {
-                await self.finish(.failure(error.localizedDescription))
+                await self.finish(.failure(error.localizedDescription), received: false)
             }
         }
     }
@@ -107,25 +126,29 @@ final class TransferModel: ObservableObject {
         let relayAddress = self.relay
         let password = relayPassword
         let destination = receiveFolder
-        status = .working("Connecting to sender…")
+        status = .working("Sniffing out the sender…")
 
         Task.detached(priority: .userInitiated) {
             do {
                 try CrocBridge.receive(code: code, relay: relayAddress, relayPassword: password, destination: destination)
-                await self.finish(.success("Files saved. Open the Files app → Croc → Received."))
+                await self.finish(.success("Chomp! Files saved to Files → Croc → Received."), received: true)
             } catch {
-                await self.finish(.failure(error.localizedDescription))
+                await self.finish(.failure(error.localizedDescription), received: false)
             }
         }
     }
 
     func clearStatus() {
-        if !status.isWorking { status = .idle }
+        if !status.isWorking {
+            status = .idle
+            canShowReceived = false
+        }
     }
 
-    private func finish(_ result: Status) {
+    private func finish(_ result: Status, received: Bool) {
         status = result
-        if case .success = result {
+        canShowReceived = received
+        if case .success = result, !received {
             selectedFiles.forEach { try? FileManager.default.removeItem(at: $0) }
             selectedFiles.removeAll()
             regenerateCode()
