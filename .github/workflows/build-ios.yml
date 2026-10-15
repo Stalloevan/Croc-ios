@@ -57,17 +57,18 @@ jobs:
           msg=$(grep -E '^(---|ok|PASS|FAIL)' "$RUNNER_TEMP/cli.log" | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
           echo "::notice title=Cross-client tests passed::${msg}"
 
+  # Builds the unsigned IPA. Runs in parallel with `test`; only the release waits for both.
   build:
-    needs: test
     runs-on: macos-15
     timeout-minutes: 60
-    permissions:
-      contents: write
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
       # Version is YY.MMDD.N (US Eastern date); N counts releases made that day.
       - name: Compute version
+        id: ver
         shell: bash
         run: |
           prefix=$(TZ=America/New_York date +%y.%m%d)
@@ -75,25 +76,45 @@ jobs:
           while git ls-remote --exit-code --tags origin "refs/tags/${prefix}.${n}" >/dev/null 2>&1; do
             n=$((n + 1))
           done
-          echo "VERSION=${prefix}.${n}" >> "$GITHUB_ENV"
+          echo "version=${prefix}.${n}" >> "$GITHUB_OUTPUT"
           echo "Release version: ${prefix}.${n}"
 
       - name: Stamp app version
         shell: bash
         run: |
-          sed -i '' "s/CFBundleShortVersionString: \"0.1.0\"/CFBundleShortVersionString: \"${VERSION}\"/" project.yml
+          sed -i '' "s/CFBundleShortVersionString: \"0.1.0\"/CFBundleShortVersionString: \"${{ steps.ver.outputs.version }}\"/" project.yml
           sed -i '' "s/CFBundleVersion: \"1\"/CFBundleVersion: \"${{ github.run_number }}\"/" project.yml
           grep -n "Version" project.yml
 
+      # The Go framework is the slow part (~4 min), and most pushes only change Swift.
+      # Rebuild it only when the Go wrapper, its build script or croc itself changed.
+      - name: Find latest croc release
+        id: croc
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: echo "version=$(gh api repos/schollz/croc/releases/latest --jq .tag_name)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Croc.xcframework
+        id: fw
+        uses: actions/cache@v4
+        with:
+          path: Frameworks/Croc.xcframework
+          key: xcframework-v2-${{ steps.croc.outputs.version }}-${{ hashFiles('go/crocmobile/crocmobile.go', 'go/go.mod', 'scripts/build-croc-framework.sh') }}
+
       - uses: actions/setup-go@v5
+        if: steps.fw.outputs.cache-hit != 'true'
         with:
           go-version: stable
           check-latest: true
           cache: false
 
       - name: Build Croc.xcframework
+        if: steps.fw.outputs.cache-hit != 'true'
         env:
           GOTOOLCHAIN: auto
+          CROC_VERSION: ${{ steps.croc.outputs.version }}
+          TARGETS: ios   # the IPA only needs the device slice
         shell: bash
         run: |
           mkdir -p build
@@ -109,6 +130,7 @@ jobs:
           xcodegen generate
 
       - name: Build unsigned archive
+        shell: bash
         run: |
           mkdir -p build
           set -o pipefail
@@ -119,12 +141,12 @@ jobs:
             -destination 'generic/platform=iOS' \
             -archivePath build/CrocApp.xcarchive \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            COMPILER_INDEX_STORE_ENABLE=NO \
             > build/xcodebuild.log 2>&1 || {
             msg=$(grep -E "error:|\*\* ARCHIVE FAILED" build/xcodebuild.log | head -n 25 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
             echo "::error title=xcodebuild failed::${msg}"
             exit 1
           }
-        shell: bash
 
       - name: Package IPA
         run: |
@@ -138,19 +160,33 @@ jobs:
           name: Croc-unsigned-ipa
           path: build/Croc-unsigned.ipa
 
-      - name: Publish GitHub release
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          cp build/Croc-unsigned.ipa "build/Croc-${VERSION}-unsigned.ipa"
-          gh release create "${VERSION}" "build/Croc-${VERSION}-unsigned.ipa" \
-            --title "${VERSION}" \
-            --target "${GITHUB_SHA}" \
-            --generate-notes
-
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
           name: build-logs
-          path: build/xcodebuild.log
+          path: build/*.log
+
+  # Publishes the IPA once both the build and the transfer tests have passed.
+  release:
+    needs: [test, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Croc-unsigned-ipa
+
+      - name: Publish GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          cp Croc-unsigned.ipa "Croc-${VERSION}-unsigned.ipa"
+          gh release create "${VERSION}" "Croc-${VERSION}-unsigned.ipa" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "${VERSION}" \
+            --target "${GITHUB_SHA}" \
+            --generate-notes

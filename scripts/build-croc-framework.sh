@@ -15,14 +15,15 @@ fi
 echo "Initialising gomobile..."
 gomobile init
 
-echo "Fetching croc (latest v11 release)..."
-go get github.com/schollz/croc/v11@latest
+echo "Fetching croc (${CROC_VERSION:-latest v11 release})..."
+go get "github.com/schollz/croc/v11@${CROC_VERSION:-latest}"
 go get -tool golang.org/x/mobile/cmd/gobind
 go get golang.org/x/mobile/bind
 go mod tidy
 
 mkdir -p "$ROOT/Frameworks"
-echo "Binding for iOS device and simulator..."
-gomobile bind -target=ios,iossimulator -o "$ROOT/Frameworks/Croc.xcframework" ./crocmobile
+# TARGETS defaults to device + simulator for local work; CI sets TARGETS=ios (device only).
+echo "Binding for ${TARGETS:-ios,iossimulator}..."
+gomobile bind -target="${TARGETS:-ios,iossimulator}" -o "$ROOT/Frameworks/Croc.xcframework" ./crocmobile
 
 echo "Done: $ROOT/Frameworks/Croc.xcframework"
