@@ -251,7 +251,7 @@ struct SettingsSheet: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("host:port", text: $model.relay)
+                    TextField("Automatic (public relays)", text: $model.relay)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .keyboardType(.URL)
@@ -259,7 +259,7 @@ struct SettingsSheet: View {
                 } header: {
                     Text("Swamp relay")
                 } footer: {
-                    Text("Both sides must use the same relay. Leave these alone to use the public croc relay.")
+                    Text("Leave the relay empty to use the public croc relays, chosen automatically from the code like other croc apps. Set host:port only to use your own relay on both sides.")
                 }
 
                 Section {
@@ -271,7 +271,7 @@ struct SettingsSheet: View {
                 }
 
                 Section {
-                    Button("Back to the public relay") { model.resetSettings() }
+                    Button("Back to automatic") { model.resetSettings() }
                 }
             }
             .navigationTitle("Swamp settings")

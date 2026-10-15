@@ -3,52 +3,71 @@
 //
 // gomobile can only bind exported functions that use basic types (string,
 // bool, int, error), so all croc structs stay behind this boundary.
+//
+// The options below deliberately mirror what the croc command-line client
+// sets, so that this app and other croc clients (CLI, web) can talk to each
+// other: same PAKE curve, same hash, same default relay password and, most
+// importantly, the same way of choosing a relay.
 package crocmobile
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"sync"
 
 	"github.com/schollz/croc/v11/src/codephrase"
 	"github.com/schollz/croc/v11/src/croc"
+	"github.com/schollz/croc/v11/src/publicrelay"
 )
 
 const (
-	// DefaultRelay is the public croc relay used when none is configured.
-	DefaultRelay = "croc.schollz.com:9009"
-
-	// DefaultRelayPassword is the password the public croc relay expects; the
+	// DefaultRelayPassword is the password the public croc relays expect; the
 	// croc CLI sends it unless told otherwise. An empty password is rejected
-	// by the relay with "bad password".
+	// by a relay with "bad password".
 	DefaultRelayPassword = "pass123"
 
 	// defaultPorts matches the croc CLI's default relay ports.
 	defaultPorts = "9009,9010,9011,9012,9013"
+
+	defaultRelayPort = "9009"
+	multicastAddress = "239.255.255.250"
 )
 
-// transferMu serialises transfers. Receive changes the process working
-// directory to choose where files land, so only one transfer may run at once.
-var transferMu sync.Mutex
+// receiveMu serialises receives: Receive changes the process working
+// directory to choose where files land.
+var receiveMu sync.Mutex
 
 // GenerateCode returns a new random code phrase for a send.
 func GenerateCode() (string, error) {
 	return codephrase.Generate()
 }
 
+// RelayFor reports which relay a transfer with this code and relay setting
+// would use. An empty relay (or the old default, croc.schollz.com) means
+// "public relay mode": like the croc CLI, the relay is derived from a hash of
+// the code, so both sides land on the same one without any coordination.
+func RelayFor(code, relay string) (string, error) {
+	addr, _, err := resolveRelay(normalizeCode(code), relay)
+	return addr, err
+}
+
 // Send offers the files listed in paths (newline-separated absolute paths)
 // to a receiver that uses the same code, and blocks until the transfer ends.
 func Send(paths, code, relay, relayPassword string) error {
-	transferMu.Lock()
-	defer transferMu.Unlock()
-
 	list := splitPaths(paths)
 	if len(list) == 0 {
 		return errors.New("no files selected")
 	}
-	if strings.TrimSpace(code) == "" {
+	code = normalizeCode(code)
+	if code == "" {
 		return errors.New("a code phrase is required")
+	}
+
+	opts, err := makeOptions(true, code, relay, relayPassword)
+	if err != nil {
+		return err
 	}
 
 	infos, emptyFolders, folderCount, err := croc.GetFilesInfo(list, false, false, nil)
@@ -56,7 +75,7 @@ func Send(paths, code, relay, relayPassword string) error {
 		return err
 	}
 
-	c, err := croc.New(makeOptions(true, code, relay, relayPassword))
+	c, err := croc.New(opts)
 	if err != nil {
 		return err
 	}
@@ -66,16 +85,21 @@ func Send(paths, code, relay, relayPassword string) error {
 // Receive waits for a sender that uses the same code and saves the incoming
 // files into destDir. It blocks until the transfer ends.
 func Receive(code, relay, relayPassword, destDir string) error {
-	transferMu.Lock()
-	defer transferMu.Unlock()
-
-	if strings.TrimSpace(code) == "" {
+	code = normalizeCode(code)
+	if code == "" {
 		return errors.New("a code phrase is required")
 	}
-	if err := os.MkdirAll(destDir, 0o755); err != nil {
+	opts, err := makeOptions(false, code, relay, relayPassword)
+	if err != nil {
 		return err
 	}
 
+	receiveMu.Lock()
+	defer receiveMu.Unlock()
+
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		return err
+	}
 	previous, err := os.Getwd()
 	if err != nil {
 		return err
@@ -85,29 +109,64 @@ func Receive(code, relay, relayPassword, destDir string) error {
 	}
 	defer func() { _ = os.Chdir(previous) }()
 
-	c, err := croc.New(makeOptions(false, code, relay, relayPassword))
+	c, err := croc.New(opts)
 	if err != nil {
 		return err
 	}
 	return c.Receive()
 }
 
+// resolveRelay returns the relay address to use and whether it came from the
+// public relay pool.
+func resolveRelay(code, relay string) (addr string, public bool, err error) {
+	if isAutomaticRelay(relay) {
+		pool := publicrelay.Relays()
+		idx, err := codephrase.RelayIndex(code, len(pool))
+		if err != nil {
+			return "", false, fmt.Errorf("could not choose a public relay: %w", err)
+		}
+		return pool[idx], true, nil
+	}
+	addr = strings.TrimSpace(relay)
+	if !strings.Contains(addr, ":") {
+		addr += ":" + defaultRelayPort
+	}
+	return addr, false, nil
+}
+
+// isAutomaticRelay is true for an empty setting and for the old built-in
+// default that earlier versions of the app saved.
+func isAutomaticRelay(relay string) bool {
+	switch strings.ToLower(strings.TrimSpace(relay)) {
+	case "", "auto", "automatic", "croc.schollz.com", "croc.schollz.com:9009":
+		return true
+	}
+	return false
+}
+
 // makeOptions builds croc options suited to a non-interactive mobile app:
 // no prompts, no stdin, no terminal output, no clipboard, and no LAN
 // discovery (which would need extra iOS local-network permissions).
-func makeOptions(isSender bool, code, relay, relayPassword string) croc.Options {
-	if strings.TrimSpace(relay) == "" {
-		relay = DefaultRelay
+func makeOptions(isSender bool, code, relay, relayPassword string) (croc.Options, error) {
+	addr, public, err := resolveRelay(code, relay)
+	if err != nil {
+		return croc.Options{}, err
 	}
 	if relayPassword == "" {
 		relayPassword = DefaultRelayPassword
 	}
 	return croc.Options{
 		IsSender:         isSender,
-		SharedSecret:     strings.TrimSpace(code),
-		RelayAddress:     relay,
+		SharedSecret:     code,
+		RelayAddress:     addr,
+		RelayAddress6:    "",
+		PublicRelay:      public,
 		RelayPorts:       strings.Split(defaultPorts, ","),
 		RelayPassword:    relayPassword,
+		Curve:            "p256",
+		HashAlgorithm:    "xxhash",
+		MulticastAddress: multicastAddress,
+		Transport:        croc.TransportAuto,
 		NoPrompt:         true,
 		IgnoreStdin:      true,
 		Quiet:            true,
@@ -116,7 +175,13 @@ func makeOptions(isSender bool, code, relay, relayPassword string) croc.Options 
 		ShowQrCode:       false,
 		Overwrite:        false,
 		Rename:           true,
-	}
+	}, nil
+}
+
+// normalizeCode trims the code and joins words typed with spaces, as the croc
+// CLI does when a code is given as several arguments.
+func normalizeCode(code string) string {
+	return strings.Join(strings.Fields(code), "-")
 }
 
 func splitPaths(paths string) []string {

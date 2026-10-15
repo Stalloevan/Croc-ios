@@ -10,7 +10,55 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          check-latest: true
+          cache: false
+
+      - name: Resolve Go dependencies
+        working-directory: go
+        run: |
+          go get github.com/schollz/croc/v11@latest
+          go mod tidy
+
+      # Real transfers through a local relay: app -> app, and relay selection.
+      - name: Wrapper tests
+        working-directory: go
+        shell: bash
+        run: |
+          if ! go test ./crocmobile -run 'TestLoopback|TestRelayMapping' -v -timeout 240s > "$RUNNER_TEMP/wrapper.log" 2>&1; then
+            msg=$(tail -n 60 "$RUNNER_TEMP/wrapper.log" | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=Wrapper tests failed::${msg}"
+            exit 1
+          fi
+          msg=$(tail -n 12 "$RUNNER_TEMP/wrapper.log" | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+          echo "::notice title=Wrapper tests passed::${msg}"
+
+      # App <-> the real croc CLI, both directions. Informational: reports, never blocks.
+      - name: Cross-client tests (croc CLI)
+        continue-on-error: true
+        working-directory: go
+        shell: bash
+        run: |
+          go install github.com/schollz/croc/v11@latest
+          export PATH="$PATH:$(go env GOPATH)/bin"
+          if ! go test ./crocmobile -run 'TestCLI' -v -timeout 300s > "$RUNNER_TEMP/cli.log" 2>&1; then
+            msg=$(tail -n 70 "$RUNNER_TEMP/cli.log" | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::warning title=Cross-client tests failed::${msg}"
+            exit 1
+          fi
+          msg=$(grep -E '^(---|ok|PASS|FAIL)' "$RUNNER_TEMP/cli.log" | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+          echo "::notice title=Cross-client tests passed::${msg}"
+
   build:
+    needs: test
     runs-on: macos-15
     timeout-minutes: 60
     permissions:

@@ -5,7 +5,8 @@ import Croc
 /// The only file that talks to the Go library. If Xcode reports that the
 /// generated Crocmobile* names differ, adjust the calls here.
 enum CrocBridge {
-    static let defaultRelay = "croc.schollz.com:9009"
+    /// Empty means "automatic": the relay is derived from the code, as other croc clients do.
+    static let defaultRelay = ""
 
     static func generateCode() throws -> String {
         var err: NSError?

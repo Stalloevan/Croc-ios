@@ -47,8 +47,10 @@ later builds are reproducible.
 - **Receive:** switch to *Receive*, paste the swamp code, tap *Chomp it down*. Files
   are saved to the *Received* folder (Files app → Croc); *Show in Files* opens it.
 - **Swamp settings** (gear button): change the relay (`host:port`) and password.
-  Both sides must use the same relay. The default is the public relay
-  `croc.schollz.com:9009`, whose password (`pass123`) is used when none is set.
+  Leave the relay empty for the public
+  croc relays: like the croc CLI, the relay is derived from the code, so other croc
+  clients find the same one. Set `host:port` only to use your own relay on both
+  sides. The public relay password (`pass123`) is used when none is set.
 
 ## Known limitations (first version)
 

@@ -41,7 +41,9 @@ final class TransferModel: ObservableObject {
     }
 
     init() {
-        relay = UserDefaults.standard.string(forKey: "relay") ?? CrocBridge.defaultRelay
+        let savedRelay = UserDefaults.standard.string(forKey: "relay") ?? CrocBridge.defaultRelay
+        // Earlier versions saved the old built-in default; that now means "automatic".
+        relay = savedRelay == "croc.schollz.com:9009" ? CrocBridge.defaultRelay : savedRelay
         keepRunning = UserDefaults.standard.object(forKey: "keepRunning") as? Bool ?? true
         regenerateCode()
     }
