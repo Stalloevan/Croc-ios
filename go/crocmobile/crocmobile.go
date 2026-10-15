@@ -79,7 +79,7 @@ func Send(paths, code, relay, relayPassword string) error {
 	if err != nil {
 		return err
 	}
-	return c.Send(infos, emptyFolders, folderCount)
+	return mapError(c.Send(infos, emptyFolders, folderCount))
 }
 
 // Receive waits for a sender that uses the same code and saves the incoming
@@ -113,7 +113,23 @@ func Receive(code, relay, relayPassword, destDir string) error {
 	if err != nil {
 		return err
 	}
-	return c.Receive()
+	return mapError(c.Receive())
+}
+
+// declinedMessage is the stable text the app looks for to tell "the receiver
+// said no" apart from a real failure.
+const declinedMessage = "transfer declined by the receiver"
+
+// mapError turns croc's refusal errors into declinedMessage.
+func mapError(err error) error {
+	if err == nil {
+		return nil
+	}
+	text := err.Error()
+	if strings.Contains(text, "refusing files") || strings.Contains(text, "refused files") {
+		return errors.New(declinedMessage)
+	}
+	return err
 }
 
 // resolveRelay returns the relay address to use and whether it came from the

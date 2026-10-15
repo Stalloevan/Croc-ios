@@ -9,6 +9,8 @@ final class TransferModel: ObservableObject {
         case idle
         case working(String)
         case success(String)
+        /// Not an error: something the user should know about, such as a declined transfer.
+        case notice(String)
         case failure(String)
 
         var isWorking: Bool {
@@ -112,15 +114,19 @@ final class TransferModel: ObservableObject {
         let code = sendCode
         let relayAddress = self.relay
         let password = relayPassword
-        status = .working("Waiting for the receiver to snap on…")
+        status = .working("Waiting for the receiver…")
         keepAlive.start(useAudio: keepRunning)
 
         Task.detached(priority: .userInitiated) {
             do {
                 try CrocBridge.send(files: files, code: code, relay: relayAddress, relayPassword: password)
-                await self.finish(.success("Snap! \(files.count) item(s) delivered."), received: false)
+                await self.finish(.success("Sent \(files.count) item(s)."), received: false)
             } catch {
-                await self.finish(.failure(error.localizedDescription), received: false)
+                if CrocBridge.isDeclined(error) {
+                    await self.finish(.notice("The receiver declined the transfer."), received: false)
+                } else {
+                    await self.finish(.failure(error.localizedDescription), received: false)
+                }
             }
         }
     }
@@ -136,13 +142,13 @@ final class TransferModel: ObservableObject {
         let relayAddress = self.relay
         let password = relayPassword
         let destination = receiveFolder
-        status = .working("Sniffing out the sender…")
+        status = .working("Connecting to the sender…")
         keepAlive.start(useAudio: keepRunning)
 
         Task.detached(priority: .userInitiated) {
             do {
                 try CrocBridge.receive(code: code, relay: relayAddress, relayPassword: password, destination: destination)
-                await self.finish(.success("Chomp! Files saved to Files → Croc → Received."), received: true)
+                await self.finish(.success("Files saved to Files → Croc → Received."), received: true)
             } catch {
                 await self.finish(.failure(error.localizedDescription), received: false)
             }
@@ -163,6 +169,8 @@ final class TransferModel: ObservableObject {
         if case .success = result, !received {
             selectedFiles.forEach { try? FileManager.default.removeItem(at: $0) }
             selectedFiles.removeAll()
+            regenerateCode()
+        } else if case .notice = result {
             regenerateCode()
         }
     }

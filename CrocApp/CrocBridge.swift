@@ -29,4 +29,9 @@ enum CrocBridge {
         CrocmobileReceive(code, relay, relayPassword, destination.path, &err)
         if let err { throw err }
     }
+
+    /// True when the receiver turned the transfer down (not a failure).
+    static func isDeclined(_ error: Error) -> Bool {
+        (error as NSError).localizedDescription.contains("declined by the receiver")
+    }
 }

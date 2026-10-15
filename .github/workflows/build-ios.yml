@@ -33,7 +33,7 @@ jobs:
         working-directory: go
         shell: bash
         run: |
-          if ! go test ./crocmobile -run 'TestLoopback|TestRelayMapping' -v -timeout 240s > "$RUNNER_TEMP/wrapper.log" 2>&1; then
+          if ! go test ./crocmobile -run 'TestLoopback|TestRelayMapping|TestDeclinedMapping' -v -timeout 240s > "$RUNNER_TEMP/wrapper.log" 2>&1; then
             msg=$(tail -n 60 "$RUNNER_TEMP/wrapper.log" | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
             echo "::error title=Wrapper tests failed::${msg}"
             exit 1

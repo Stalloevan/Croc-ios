@@ -13,12 +13,12 @@ struct ContentView: View {
     @State private var mode: Mode = .send
     @State private var showingSettings = false
     @State private var showingPicker = false
+    @State private var copied = false
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    CrocHeader(mode: mode)
                     Picker("Mode", selection: $mode) {
                         ForEach(Mode.allCases) { Text($0.rawValue).tag($0) }
                     }
@@ -38,11 +38,21 @@ struct ContentView: View {
             .navigationTitle("Croc")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .principal) {
+                    HStack(spacing: 6) {
+                        Image("CrocMark")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 26, height: 26)
+                            .accessibilityHidden(true)
+                        Text("Croc").font(.headline)
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { showingSettings = true } label: {
                         Image(systemName: "gearshape")
                     }
-                    .accessibilityLabel("Swamp settings")
+                    .accessibilityLabel("Settings")
                 }
             }
             .sheet(isPresented: $showingSettings) { SettingsSheet() }
@@ -59,6 +69,17 @@ struct ContentView: View {
         }
     }
 
+    private func copyCode() {
+        guard !model.sendCode.isEmpty else { return }
+        UIPasteboard.general.string = model.sendCode
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        withAnimation { copied = true }
+        Task {
+            try? await Task.sleep(nanoseconds: 1_800_000_000)
+            await MainActor.run { withAnimation { copied = false } }
+        }
+    }
+
     // MARK: Send
 
     @ViewBuilder private var sendSections: some View {
@@ -70,11 +91,13 @@ struct ContentView: View {
                 .padding(.vertical, 6)
 
             HStack {
-                Button {
-                    UIPasteboard.general.string = model.sendCode
-                } label: {
-                    Label("Copy", systemImage: "doc.on.doc")
+                Button { copyCode() } label: {
+                    Label(copied ? "Copied" : "Copy",
+                          systemImage: copied ? "checkmark" : "doc.on.doc")
+                        .foregroundStyle(copied ? Color.green : Color.accentColor)
+                        .contentTransition(.symbolEffect(.replace))
                 }
+                .accessibilityLabel(copied ? "Code copied" : "Copy code")
                 Spacer()
                 ShareLink(item: model.sendCode) {
                     Label("Share", systemImage: "square.and.arrow.up")
@@ -88,14 +111,14 @@ struct ContentView: View {
             .labelStyle(.titleAndIcon)
             .disabled(model.status.isWorking || model.sendCode.isEmpty)
         } header: {
-            Text("Swamp code")
+            Text("Code")
         } footer: {
             Text("Give this code to the receiver and keep Croc open until the transfer finishes.")
         }
 
-        Section("The catch") {
+        Section("Files") {
             if model.selectedFiles.isEmpty {
-                Text("Nothing here yet. Add the files you want to send.")
+                Text("No files yet. Add the files you want to send.")
                     .foregroundStyle(.secondary)
             }
             ForEach(model.selectedFiles, id: \.self) { url in
@@ -111,7 +134,7 @@ struct ContentView: View {
 
         Section {
             Button { model.sendSelectedFiles() } label: {
-                ActionLabel(title: "Snap it over", systemImage: "paperplane.fill", busy: model.status.isWorking)
+                ActionLabel(title: "Send", systemImage: "paperplane.fill", busy: model.status.isWorking)
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
@@ -141,14 +164,14 @@ struct ContentView: View {
                 .accessibilityLabel("Paste code")
             }
         } header: {
-            Text("Swamp code")
+            Text("Code")
         } footer: {
             Text("Type or paste the code the sender sees. Files land in Files → Croc → Received.")
         }
 
         Section {
             Button { model.receiveFiles() } label: {
-                ActionLabel(title: "Chomp it down", systemImage: "arrow.down.circle.fill", busy: model.status.isWorking)
+                ActionLabel(title: "Receive", systemImage: "arrow.down.circle.fill", busy: model.status.isWorking)
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
@@ -160,27 +183,6 @@ struct ContentView: View {
 }
 
 // MARK: - Pieces
-
-/// Mascot and one-line description for the current mode.
-struct CrocHeader: View {
-    let mode: ContentView.Mode
-
-    var body: some View {
-        VStack(spacing: 4) {
-            CrocGlyphView(size: 56)
-            Text(mode == .send ? "Snap files across" : "Chomp files down")
-                .font(.title3.weight(.semibold))
-            Text(mode == .send
-                 ? "Pick files, share the swamp code, done."
-                 : "Enter the swamp code to grab files.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.bottom, 4)
-        .accessibilityElement(children: .combine)
-    }
-}
 
 /// Button label that swaps to a spinner while a transfer runs.
 struct ActionLabel: View {
@@ -205,7 +207,6 @@ struct ActionLabel: View {
 /// Progress and result of the current transfer.
 struct StatusSection: View {
     @EnvironmentObject private var model: TransferModel
-    @State private var wobble = false
 
     var body: some View {
         switch model.status {
@@ -214,10 +215,7 @@ struct StatusSection: View {
         case .working(let message):
             Section {
                 HStack(spacing: 12) {
-                    CrocGlyphView(size: 30)
-                        .rotationEffect(.degrees(wobble ? 8 : -8))
-                        .animation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true), value: wobble)
-                        .onAppear { wobble = true }
+                    ProgressView()
                     Text(message)
                 }
             }
@@ -229,6 +227,15 @@ struct StatusSection: View {
                     Button { model.showReceivedFolder() } label: {
                         Label("Show in Files", systemImage: "folder")
                     }
+                }
+                Button("Dismiss") { model.clearStatus() }
+            }
+        case .notice(let message):
+            Section {
+                Label {
+                    Text(message)
+                } icon: {
+                    Image(systemName: "hand.raised.fill").foregroundStyle(.orange)
                 }
                 Button("Dismiss") { model.clearStatus() }
             }
@@ -257,7 +264,7 @@ struct SettingsSheet: View {
                         .keyboardType(.URL)
                     SecureField("Password (optional)", text: $model.relayPassword)
                 } header: {
-                    Text("Swamp relay")
+                    Text("Relay")
                 } footer: {
                     Text("Leave the relay empty to use the public croc relays, chosen automatically from the code like other croc apps. Set host:port only to use your own relay on both sides.")
                 }
@@ -274,7 +281,7 @@ struct SettingsSheet: View {
                     Button("Back to automatic") { model.resetSettings() }
                 }
             }
-            .navigationTitle("Swamp settings")
+            .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {

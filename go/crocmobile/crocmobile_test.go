@@ -2,6 +2,7 @@ package crocmobile
 
 import (
 	"bytes"
+	"errors"
 	"context"
 	"crypto/rand"
 	"net"
@@ -127,6 +128,21 @@ func TestRelayMapping(t *testing.T) {
 	}
 	if normalizeCode(" mouth ripen  baker ") != code {
 		t.Fatal("normalizeCode did not join words")
+	}
+}
+
+func TestDeclinedMapping(t *testing.T) {
+	for _, in := range []string{"refusing files", "peer error: refusing files", "refused files"} {
+		if got := mapError(errors.New(in)); got == nil || got.Error() != declinedMessage {
+			t.Fatalf("%q mapped to %v", in, got)
+		}
+	}
+	other := errors.New("relay connection failed")
+	if mapError(other) != other {
+		t.Fatal("unrelated errors must pass through")
+	}
+	if mapError(nil) != nil {
+		t.Fatal("nil must stay nil")
 	}
 }
 

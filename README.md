@@ -42,11 +42,11 @@ later builds are reproducible.
 
 ## Using the app
 
-- **Send:** switch to *Send*, tap *Add files*, then *Snap it over*. Give the swamp
-  code (copy or share it) to the receiver and keep the app open until it finishes.
-- **Receive:** switch to *Receive*, paste the swamp code, tap *Chomp it down*. Files
+- **Send:** switch to *Send*, tap *Add files*, then *Send*. Give the code
+  (copy or share it) to the receiver and keep the app open until it finishes.
+- **Receive:** switch to *Receive*, paste the code, tap *Receive*. Files
   are saved to the *Received* folder (Files app → Croc); *Show in Files* opens it.
-- **Swamp settings** (gear button): change the relay (`host:port`) and password.
+- **Settings** (gear button): change the relay (`host:port`) and password.
   Leave the relay empty for the public
   croc relays: like the croc CLI, the relay is derived from the code, so other croc
   clients find the same one. Set `host:port` only to use your own relay on both
