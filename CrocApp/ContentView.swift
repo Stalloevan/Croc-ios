@@ -167,7 +167,7 @@ struct CrocHeader: View {
 
     var body: some View {
         VStack(spacing: 4) {
-            Text("🐊").font(.system(size: 54))
+            CrocGlyphView(size: 56)
             Text(mode == .send ? "Snap files across" : "Chomp files down")
                 .font(.title3.weight(.semibold))
             Text(mode == .send
@@ -214,8 +214,7 @@ struct StatusSection: View {
         case .working(let message):
             Section {
                 HStack(spacing: 12) {
-                    Text("🐊")
-                        .font(.title)
+                    CrocGlyphView(size: 30)
                         .rotationEffect(.degrees(wobble ? 8 : -8))
                         .animation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true), value: wobble)
                         .onAppear { wobble = true }
@@ -261,6 +260,14 @@ struct SettingsSheet: View {
                     Text("Swamp relay")
                 } footer: {
                     Text("Both sides must use the same relay. Leave these alone to use the public croc relay.")
+                }
+
+                Section {
+                    Toggle("Keep running in background", isOn: $model.keepRunning)
+                } header: {
+                    Text("Background")
+                } footer: {
+                    Text("Lets a transfer carry on while you switch to another app, such as a browser, by playing inaudible audio. Uses more battery while a transfer is running.")
                 }
 
                 Section {

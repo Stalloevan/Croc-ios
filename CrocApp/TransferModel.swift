@@ -27,6 +27,12 @@ final class TransferModel: ObservableObject {
         didSet { UserDefaults.standard.set(relay, forKey: "relay") }
     }
     @Published var relayPassword: String = ""
+    /// Keep transfers alive when the app is in the background (see BackgroundKeepAlive).
+    @Published var keepRunning: Bool {
+        didSet { UserDefaults.standard.set(keepRunning, forKey: "keepRunning") }
+    }
+
+    private let keepAlive = BackgroundKeepAlive()
 
     /// Received files are saved here and appear under "On My iPhone > Croc" in the Files app.
     var receiveFolder: URL {
@@ -36,6 +42,7 @@ final class TransferModel: ObservableObject {
 
     init() {
         relay = UserDefaults.standard.string(forKey: "relay") ?? CrocBridge.defaultRelay
+        keepRunning = UserDefaults.standard.object(forKey: "keepRunning") as? Bool ?? true
         regenerateCode()
     }
 
@@ -104,6 +111,7 @@ final class TransferModel: ObservableObject {
         let relayAddress = self.relay
         let password = relayPassword
         status = .working("Waiting for the receiver to snap on…")
+        keepAlive.start(useAudio: keepRunning)
 
         Task.detached(priority: .userInitiated) {
             do {
@@ -127,6 +135,7 @@ final class TransferModel: ObservableObject {
         let password = relayPassword
         let destination = receiveFolder
         status = .working("Sniffing out the sender…")
+        keepAlive.start(useAudio: keepRunning)
 
         Task.detached(priority: .userInitiated) {
             do {
@@ -146,6 +155,7 @@ final class TransferModel: ObservableObject {
     }
 
     private func finish(_ result: Status, received: Bool) {
+        keepAlive.stop()
         status = result
         canShowReceived = received
         if case .success = result, !received {
