@@ -19,6 +19,11 @@ const (
 	// DefaultRelay is the public croc relay used when none is configured.
 	DefaultRelay = "croc.schollz.com:9009"
 
+	// DefaultRelayPassword is the password the public croc relay expects; the
+	// croc CLI sends it unless told otherwise. An empty password is rejected
+	// by the relay with "bad password".
+	DefaultRelayPassword = "pass123"
+
 	// defaultPorts matches the croc CLI's default relay ports.
 	defaultPorts = "9009,9010,9011,9012,9013"
 )
@@ -93,6 +98,9 @@ func Receive(code, relay, relayPassword, destDir string) error {
 func makeOptions(isSender bool, code, relay, relayPassword string) croc.Options {
 	if strings.TrimSpace(relay) == "" {
 		relay = DefaultRelay
+	}
+	if relayPassword == "" {
+		relayPassword = DefaultRelayPassword
 	}
 	return croc.Options{
 		IsSender:         isSender,
