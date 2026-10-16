@@ -2,9 +2,9 @@ package crocmobile
 
 import (
 	"bytes"
-	"errors"
 	"context"
 	"crypto/rand"
+	"errors"
 	"net"
 	"os"
 	"os/exec"
@@ -143,6 +143,28 @@ func TestDeclinedMapping(t *testing.T) {
 	}
 	if mapError(nil) != nil {
 		t.Fatal("nil must stay nil")
+	}
+}
+
+func TestSecureChannelRetry(t *testing.T) {
+	for _, in := range []string{"could not secure channel", "room (secure channel) not ready, maybe peer disconnected"} {
+		retry, final := shouldRetry(errors.New(in), 0)
+		if !retry || final != nil {
+			t.Fatalf("%q should be retried silently", in)
+		}
+		retry, final = shouldRetry(errors.New(in), maxSecureRetries)
+		if retry || final == nil || strings.Contains(strings.ToLower(final.Error()), "secure channel") {
+			t.Fatalf("after the cap the error must be generic, got %v", final)
+		}
+	}
+	if retry, _ := shouldRetry(errors.New("password mismatch"), 0); retry {
+		t.Fatal("a wrong code must not be retried")
+	}
+	if retry, final := shouldRetry(nil, 0); retry || final != nil {
+		t.Fatal("success must pass through")
+	}
+	if _, final := shouldRetry(errors.New("refusing files"), 0); final == nil || final.Error() != declinedMessage {
+		t.Fatal("declined must still be mapped")
 	}
 }
 

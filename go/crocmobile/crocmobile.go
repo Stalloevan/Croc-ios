@@ -16,6 +16,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/schollz/croc/v11/src/codephrase"
 	"github.com/schollz/croc/v11/src/croc"
@@ -70,16 +71,23 @@ func Send(paths, code, relay, relayPassword string) error {
 		return err
 	}
 
-	infos, emptyFolders, folderCount, err := croc.GetFilesInfo(list, false, false, nil)
-	if err != nil {
-		return err
+	for attempt := 0; ; attempt++ {
+		infos, emptyFolders, folderCount, err := croc.GetFilesInfo(list, false, false, nil)
+		if err != nil {
+			return err
+		}
+		c, err := croc.New(opts)
+		if err != nil {
+			return err
+		}
+		err = c.Send(infos, emptyFolders, folderCount)
+		if retry, final := shouldRetry(err, attempt); retry {
+			time.Sleep(retryDelay)
+			continue
+		} else {
+			return final
+		}
 	}
-
-	c, err := croc.New(opts)
-	if err != nil {
-		return err
-	}
-	return mapError(c.Send(infos, emptyFolders, folderCount))
 }
 
 // Receive waits for a sender that uses the same code and saves the incoming
@@ -109,11 +117,48 @@ func Receive(code, relay, relayPassword, destDir string) error {
 	}
 	defer func() { _ = os.Chdir(previous) }()
 
-	c, err := croc.New(opts)
-	if err != nil {
-		return err
+	for attempt := 0; ; attempt++ {
+		c, err := croc.New(opts)
+		if err != nil {
+			return err
+		}
+		err = c.Receive()
+		if retry, final := shouldRetry(err, attempt); retry {
+			time.Sleep(retryDelay)
+			continue
+		} else {
+			return final
+		}
 	}
-	return mapError(c.Receive())
+}
+
+const (
+	// retryDelay is a short pause so a failing relay is not hammered in a tight loop.
+	retryDelay = 250 * time.Millisecond
+	// maxSecureRetries bounds the silent retries of "could not secure channel".
+	maxSecureRetries = 10
+	// connectFailedMessage is shown if the silent retries all fail.
+	connectFailedMessage = "Couldn't connect to the other device. Check the code and try again."
+)
+
+// isSecureChannelError matches croc's "could not secure channel" family. These
+// happen when a connection drops before the key exchange finishes (a stray or
+// half-open connection), and succeed on an immediate retry. A wrong code is a
+// different error ("password mismatch") and is not matched here.
+func isSecureChannelError(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "secure channel")
+}
+
+// shouldRetry decides what to do with the result of one attempt: retry quietly
+// for secure-channel errors, otherwise return the (mapped) final result.
+func shouldRetry(err error, attempt int) (retry bool, final error) {
+	if isSecureChannelError(err) {
+		if attempt < maxSecureRetries {
+			return true, nil
+		}
+		return false, errors.New(connectFailedMessage)
+	}
+	return false, mapError(err)
 }
 
 // declinedMessage is the stable text the app looks for to tell "the receiver
