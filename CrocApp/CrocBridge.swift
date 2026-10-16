@@ -43,14 +43,20 @@ enum CrocBridge {
         CrocmobileValidSSHCode(code)
     }
 
+    /// A joined shared terminal.
+    struct SSHHandle {
+        let sendInput: (Data) -> Void
+        let close: () -> Void
+    }
+
     /// Joins a shared terminal. Returns at once; output arrives through `sink`.
     static func joinSSH(code: String, relay: String, relayPassword: String, cols: Int, rows: Int,
-                        sink: CrocmobileTerminalSinkProtocol) throws -> CrocmobileSSHSession {
+                        sink: CrocmobileTerminalSink) throws -> SSHHandle {
         var err: NSError?
         let session = CrocmobileJoinSSH(code, relay, relayPassword, cols, rows, sink, &err)
         if let err { throw err }
         guard let session else { throw NSError(domain: "croc", code: 1, userInfo: [NSLocalizedDescriptionKey: "Could not join."]) }
-        return session
+        return SSHHandle(sendInput: { session.sendInput($0) }, close: { session.close() })
     }
 
     /// True when the receiver turned the transfer down (not a failure).

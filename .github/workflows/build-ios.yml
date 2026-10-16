@@ -100,7 +100,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: Frameworks/Croc.xcframework
-          key: xcframework-v2-${{ steps.croc.outputs.version }}-${{ hashFiles('go/crocmobile/crocmobile.go', 'go/go.mod', 'scripts/build-croc-framework.sh') }}
+          key: xcframework-v2-${{ steps.croc.outputs.version }}-${{ hashFiles('go/crocmobile/*.go', 'go/go.mod', 'scripts/build-croc-framework.sh') }}
 
       - uses: actions/setup-go@v5
         if: steps.fw.outputs.cache-hit != 'true'
@@ -123,6 +123,12 @@ jobs:
             echo "::error title=framework build failed::${msg}"
             exit 1
           fi
+
+      - name: List generated Go API
+        continue-on-error: true
+        run: |
+          api=$(grep -rhE "^@(interface|protocol) |^FOUNDATION_EXPORT .*Crocmobile" Frameworks/Croc.xcframework --include=*.h | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+          echo "::notice title=Go API::${api}"
 
       - name: Generate Xcode project
         run: |

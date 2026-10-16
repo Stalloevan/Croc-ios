@@ -18,7 +18,7 @@ final class SSHController: ObservableObject {
     @Published var showTerminal = false
     @Published var error: String?
 
-    private var session: CrocmobileSSHSession?
+    private var session: CrocBridge.SSHHandle?
     private var sink: Sink?
     private let keepAlive = BackgroundKeepAlive()
     weak var terminalView: TerminalView?
@@ -111,7 +111,7 @@ final class SSHController: ObservableObject {
     }
 
     /// Receives callbacks from Go on arbitrary threads.
-    final class Sink: NSObject, CrocmobileTerminalSinkProtocol {
+    final class Sink: NSObject, CrocmobileTerminalSink {
         weak var owner: SSHController?
         init(owner: SSHController) { self.owner = owner }
 
