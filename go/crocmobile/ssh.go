@@ -6,38 +6,84 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/schollz/croc/v11/src/codephrase"
 	"github.com/schollz/croc/v11/src/sshshare"
 )
 
-// TerminalSink receives the output of a shared SSH terminal. It is implemented
-// in Swift.
-type TerminalSink interface {
-	// Write delivers raw terminal output (escape sequences included).
-	Write(data []byte)
-	// Status reports connection changes. state is one of "connecting",
-	// "connected", "reconnecting", "ended" or "failed"; role is
-	// "read-write" or "read-only" once known; message is a short sentence.
-	Status(state, role, message string)
-}
-
-// SSHSession is a joined shared terminal.
+// SSHSession is a joined shared terminal. The app pulls output and status
+// with ReadOutput and NextStatus, each from its own loop.
 type SSHSession struct {
 	cancel context.CancelFunc
 	input  *io.PipeWriter
 	once   sync.Once
+	out    chan []byte
+	status chan string
+	done   chan struct{}
 }
 
-type sinkWriter struct{ sink TerminalSink }
+func (s *SSHSession) emit(state, role, message string) {
+	select {
+	case s.status <- state + "|" + role + "|" + message:
+	case <-s.done:
+	}
+}
 
-func (w sinkWriter) Write(p []byte) (int, error) {
+type sessionWriter struct{ s *SSHSession }
+
+func (w sessionWriter) Write(p []byte) (int, error) {
 	if len(p) > 0 {
 		buf := make([]byte, len(p))
 		copy(buf, p)
-		w.sink.Write(buf)
+		select {
+		case w.s.out <- buf:
+		case <-w.s.done:
+		}
 	}
 	return len(p), nil
+}
+
+// ReadOutput blocks until terminal output is available. It returns nil once
+// the session has ended and all output was read.
+func (s *SSHSession) ReadOutput() []byte {
+	select {
+	case b := <-s.out:
+		return b
+	default:
+	}
+	select {
+	case b := <-s.out:
+		return b
+	case <-s.done:
+		select {
+		case b := <-s.out:
+			return b
+		default:
+			return nil
+		}
+	}
+}
+
+// NextStatus blocks for the next "state|role|message" update, where state is
+// connecting, connected, reconnecting, ended or failed. Empty once finished.
+func (s *SSHSession) NextStatus() string {
+	select {
+	case v := <-s.status:
+		return v
+	default:
+	}
+	select {
+	case v := <-s.status:
+		return v
+	case <-s.done:
+		select {
+		case v := <-s.status:
+			return v
+		default:
+			return ""
+		}
+	}
 }
 
 // ValidSSHCode reports whether text looks like a six-word SSH invitation.
@@ -47,8 +93,8 @@ func ValidSSHCode(code string) bool {
 }
 
 // JoinSSH joins a shared terminal with a six-word invitation. It returns at
-// once; output and status arrive through the sink.
-func JoinSSH(code, relay, relayPassword string, cols, rows int, sink TerminalSink) (*SSHSession, error) {
+// once; read output and status with ReadOutput and NextStatus.
+func JoinSSH(code, relay, relayPassword string, cols, rows int) (*SSHSession, error) {
 	code = normalizeCode(code)
 	if code == "" {
 		return nil, errors.New("an SSH code is required")
@@ -65,9 +111,12 @@ func JoinSSH(code, relay, relayPassword string, cols, rows int, sink TerminalSin
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	pr, pw := io.Pipe()
-	s := &SSHSession{cancel: cancel, input: pw}
-	out := sinkWriter{sink}
-	sink.Status("connecting", "", "Connecting…")
+	s := &SSHSession{
+		cancel: cancel, input: pw,
+		out: make(chan []byte, 256), status: make(chan string, 16), done: make(chan struct{}),
+	}
+	out := sessionWriter{s}
+	s.emit("connecting", "", "Connecting…")
 	go func() {
 		err := sshshare.Join(ctx, sshshare.ClientConfig{
 			Code:          code,
@@ -83,21 +132,24 @@ func JoinSSH(code, relay, relayPassword string, cols, rows int, sink TerminalSin
 			OnEvent: func(e sshshare.JoinEvent) {
 				switch e.State {
 				case sshshare.JoinStateConnected:
-					sink.Status("connected", string(e.Role), "Connected")
+					s.emit("connected", string(e.Role), "Connected")
 				case sshshare.JoinStateReconnecting:
-					sink.Status("reconnecting", string(e.Role), "Connection lost. Reconnecting…")
+					s.emit("reconnecting", string(e.Role), "Connection lost. Reconnecting…")
 				}
 			},
 		})
 		switch {
 		case ctx.Err() != nil, errors.Is(err, sshshare.ErrDetached):
-			sink.Status("ended", "", "Disconnected")
+			s.emit("ended", "", "Disconnected")
 		case err == nil:
-			sink.Status("ended", "", "The host ended the shared terminal.")
+			s.emit("ended", "", "The host ended the shared terminal.")
 		default:
-			sink.Status("failed", "", friendlySSHError(err))
+			s.emit("failed", "", friendlySSHError(err))
 		}
 		_ = pr.Close()
+		// Let the app drain what is queued, then signal the end.
+		time.Sleep(200 * time.Millisecond)
+		close(s.done)
 	}()
 	return s, nil
 }

@@ -19,7 +19,6 @@ final class SSHController: ObservableObject {
     @Published var error: String?
 
     private var session: CrocBridge.SSHHandle?
-    private var sink: Sink?
     private let keepAlive = BackgroundKeepAlive()
     weak var terminalView: TerminalView?
     private var pending: [[UInt8]] = []
@@ -49,15 +48,28 @@ final class SSHController: ObservableObject {
     /// Called by the terminal view once it knows its size.
     func start(cols: Int, rows: Int) {
         guard session == nil, state == .connecting else { return }
-        let sink = Sink(owner: self)
-        self.sink = sink
         keepAlive.start(useAudio: keepRunning)
         let code = self.code, relay = self.relay, password = self.relayPassword
         Task.detached {
             do {
                 let session = try CrocBridge.joinSSH(code: code, relay: relay, relayPassword: password,
-                                                     cols: cols, rows: rows, sink: sink)
+                                                     cols: cols, rows: rows)
                 await MainActor.run { self.session = session }
+                Task.detached {
+                    while let data = session.readOutput() {
+                        let bytes = [UInt8](data)
+                        await MainActor.run { self.receive(bytes) }
+                    }
+                }
+                Task.detached {
+                    while true {
+                        let line = session.nextStatus()
+                        if line.isEmpty { break }
+                        let parts = line.split(separator: "|", maxSplits: 2, omittingEmptySubsequences: false).map(String.init)
+                        guard parts.count == 3 else { continue }
+                        await MainActor.run { self.status(parts[0], role: parts[1], message: parts[2]) }
+                    }
+                }
             } catch {
                 await MainActor.run { self.finish(.failed(error.localizedDescription)) }
             }
@@ -91,9 +103,10 @@ final class SSHController: ObservableObject {
         }
     }
 
-    fileprivate func status(_ state: String, role: String, message: String) {
+    fileprivate func status(_ newState: String, role: String, message: String) {
+        if self.state == .idle { return }  // a session we already left
         if !role.isEmpty { self.role = role }
-        switch state {
+        switch newState {
         case "connecting": self.state = .connecting
         case "connected": self.state = .connected
         case "reconnecting": self.state = .reconnecting
@@ -106,25 +119,7 @@ final class SSHController: ObservableObject {
     private func finish(_ final: State) {
         keepAlive.stop()
         session = nil
-        sink = nil
         state = final
-    }
-
-    /// Receives callbacks from Go on arbitrary threads.
-    final class Sink: NSObject, CrocmobileTerminalSink {
-        weak var owner: SSHController?
-        init(owner: SSHController) { self.owner = owner }
-
-        func write(_ data: Data?) {
-            guard let data else { return }
-            let bytes = [UInt8](data)
-            Task { @MainActor in self.owner?.receive(bytes) }
-        }
-
-        func status(_ state: String?, role: String?, message: String?) {
-            let s = state ?? "", r = role ?? "", m = message ?? ""
-            Task { @MainActor in self.owner?.status(s, role: r, message: m) }
-        }
     }
 }
 
