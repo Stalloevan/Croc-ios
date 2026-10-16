@@ -78,7 +78,8 @@ struct SSHTerminalView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(statusText).font(.subheadline.weight(.semibold))
                         if !ssh.role.isEmpty {
-                            Text(ssh.role == "read-write" ? "Read/write" : "Read-only")
+                            Text((ssh.role == "read-write" ? "Read/write" : "Read-only")
+                                 + (ssh.path == "tailcat" ? " · direct" : ssh.path == "relay" ? " · relay" : ""))
                                 .font(.caption).foregroundStyle(Color.muted)
                         }
                     }

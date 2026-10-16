@@ -15,6 +15,8 @@ final class SSHController: ObservableObject {
     @Published var code = ""
     @Published var state: State = .idle
     @Published var role = ""
+    /// "tailcat" (direct) or "relay" once connected.
+    @Published var path = ""
     @Published var showTerminal = false
     @Published var error: String?
 
@@ -76,10 +78,71 @@ final class SSHController: ObservableObject {
         }
     }
 
+    /// Keystrokes go through one serial queue so they can never be reordered.
+    private let inputQueue = DispatchQueue(label: "croc.ssh.input", qos: .userInteractive)
+
     func send(_ data: ArraySlice<UInt8>) {
         guard role != "read-only", let session else { return }
         let bytes = Data(data)
-        Task.detached { session.sendInput(bytes) }
+        predict(bytes)
+        inputQueue.async { session.sendInput(bytes) }
+    }
+
+    // MARK: Predictive local echo
+    //
+    // Typed characters are drawn at once instead of waiting for the network round trip. The
+    // host's echo is then swallowed when it matches. Prediction only switches on after the host
+    // has echoed a typed character back, so passwords (which are not echoed) are never drawn.
+
+    private var predicted: [UInt8] = []
+    private var echoTrusted = false
+    /// Set after Enter or a control key; the next typed character must be echoed before prediction resumes.
+    private var lineBreak = false
+
+    private func predict(_ bytes: Data) {
+        guard let view = terminalView else { return }
+        guard bytes.count == 1, let byte = bytes.first, (0x20...0x7e).contains(byte) else {
+            // Enter, control keys, escape sequences: the line state is the host's to decide.
+            echoTrusted = false
+            lineBreak = true
+            return
+        }
+        guard echoTrusted, !view.getTerminal().isCurrentBufferAlternate else {
+            lastTypedUntrusted = byte
+            return
+        }
+        predicted.append(byte)
+        view.feed(byteArray: [byte][...])
+    }
+
+    private var lastTypedUntrusted: UInt8?
+
+    /// Output from the host, with already-drawn predictions removed.
+    private func reconcile(_ incoming: [UInt8]) -> [UInt8] {
+        var data = incoming
+        if !predicted.isEmpty {
+            var matched = 0
+            while matched < predicted.count, matched < data.count, data[matched] == predicted[matched] {
+                matched += 1
+            }
+            if matched == predicted.count || matched == data.count {
+                // Echo confirmed (fully or so far): drop the part already on screen.
+                data.removeFirst(matched)
+                predicted.removeFirst(matched)
+                echoTrusted = !lineBreak
+            } else {
+                // The host did something else: erase the guesses and show the real output.
+                let erase: [UInt8] = predicted.flatMap { _ in [UInt8(8), 32, 8] }
+                terminalView?.feed(byteArray: erase[...])
+                predicted.removeAll()
+                echoTrusted = false
+            }
+        } else if let typed = lastTypedUntrusted {
+            // A single typed character that the host echoes straight back earns trust.
+            lastTypedUntrusted = nil
+            if data.first == typed { echoTrusted = true; lineBreak = false }
+        }
+        return data
     }
 
     func leave() {
@@ -95,7 +158,9 @@ final class SSHController: ObservableObject {
         pending.removeAll()
     }
 
-    fileprivate func receive(_ bytes: [UInt8]) {
+    fileprivate func receive(_ incoming: [UInt8]) {
+        let bytes = reconcile(incoming)
+        if bytes.isEmpty { return }
         if let view = terminalView {
             view.feed(byteArray: bytes[...])
         } else {
@@ -106,6 +171,7 @@ final class SSHController: ObservableObject {
     fileprivate func status(_ newState: String, role: String, message: String) {
         if self.state == .idle { return }  // a session we already left
         if !role.isEmpty { self.role = role }
+        if newState == "connected" { path = message }
         switch newState {
         case "connecting": self.state = .connecting
         case "connected": self.state = .connected

@@ -128,11 +128,11 @@ func JoinSSH(code, relay, relayPassword string, cols, rows int) (*SSHSession, er
 			ErrorOutput:   out,
 			InitialSize:   sshshare.WindowSize{Width: cols, Height: rows},
 			Reconnect:     true,
-			TransportMode: sshshare.TransportModeRelay,
+			TransportMode: sshshare.TransportModeAuto,
 			OnEvent: func(e sshshare.JoinEvent) {
 				switch e.State {
 				case sshshare.JoinStateConnected:
-					s.emit("connected", string(e.Role), "Connected")
+					s.emit("connected", string(e.Role), string(e.Transport))
 				case sshshare.JoinStateReconnecting:
 					s.emit("reconnecting", string(e.Role), "Connection lost. Reconnecting…")
 				}
