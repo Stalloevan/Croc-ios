@@ -13,6 +13,7 @@ package crocmobile
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"sync"
@@ -70,7 +71,50 @@ func Send(paths, code, relay, relayPassword string) error {
 	if err != nil {
 		return err
 	}
+	return sendWith(opts, list)
+}
 
+// SendText offers a short text message (up to 1 MiB) to a receiver that uses
+// the same code. The receiver shows it instead of saving a file.
+func SendText(text, code, relay, relayPassword string) error {
+	if strings.TrimSpace(text) == "" {
+		return errors.New("nothing to send")
+	}
+	if len(text) > maxTextBytes {
+		return errors.New("that text is too long to send (1 MiB limit)")
+	}
+	code = normalizeCode(code)
+	if code == "" {
+		return errors.New("a code phrase is required")
+	}
+	opts, err := makeOptions(true, code, relay, relayPassword)
+	if err != nil {
+		return err
+	}
+	opts.SendingText = true
+
+	dir, err := os.MkdirTemp("", "croc-text-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(dir)
+	f, err := os.CreateTemp(dir, "croc-stdin-")
+	if err != nil {
+		return err
+	}
+	if _, err := f.WriteString(text); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return sendWith(opts, []string{f.Name()})
+}
+
+const maxTextBytes = 1 << 20
+
+func sendWith(opts croc.Options, list []string) error {
 	for attempt := 0; ; attempt++ {
 		infos, emptyFolders, folderCount, err := croc.GetFilesInfo(list, false, false, nil)
 		if err != nil {
@@ -91,45 +135,89 @@ func Send(paths, code, relay, relayPassword string) error {
 }
 
 // Receive waits for a sender that uses the same code and saves the incoming
-// files into destDir. It blocks until the transfer ends.
-func Receive(code, relay, relayPassword, destDir string) error {
+// files into destDir. It blocks until the transfer ends. If the sender sent a
+// text message instead of files, the message is returned (and nothing is
+// saved); otherwise the returned string is empty.
+func Receive(code, relay, relayPassword, destDir string) (string, error) {
 	code = normalizeCode(code)
 	if code == "" {
-		return errors.New("a code phrase is required")
+		return "", errors.New("a code phrase is required")
 	}
 	opts, err := makeOptions(false, code, relay, relayPassword)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	receiveMu.Lock()
 	defer receiveMu.Unlock()
 
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
-		return err
+		return "", err
 	}
 	previous, err := os.Getwd()
 	if err != nil {
-		return err
+		return "", err
 	}
 	if err := os.Chdir(destDir); err != nil {
-		return err
+		return "", err
 	}
 	defer func() { _ = os.Chdir(previous) }()
+
+	// croc prints a received text message to stdout; capture it.
+	capture, err := startStdoutCapture()
+	if err != nil {
+		return "", err
+	}
+	defer capture.stop()
 
 	for attempt := 0; ; attempt++ {
 		c, err := croc.New(opts)
 		if err != nil {
-			return err
+			return "", err
 		}
 		err = c.Receive()
 		if retry, final := shouldRetry(err, attempt); retry {
 			time.Sleep(retryDelay)
 			continue
 		} else {
-			return final
+			return capture.stop(), final
 		}
 	}
+}
+
+// stdoutCapture redirects os.Stdout into memory while a receive runs.
+type stdoutCapture struct {
+	orig *os.File
+	w    *os.File
+	done chan struct{}
+	buf  []byte
+	once sync.Once
+}
+
+func startStdoutCapture() (*stdoutCapture, error) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		return nil, err
+	}
+	c := &stdoutCapture{orig: os.Stdout, w: w, done: make(chan struct{})}
+	os.Stdout = w
+	go func() {
+		defer close(c.done)
+		b, _ := io.ReadAll(r)
+		c.buf = b
+		_ = r.Close()
+	}()
+	return c, nil
+}
+
+// stop restores stdout and returns everything captured. Safe to call twice.
+func (c *stdoutCapture) stop() string {
+	c.once.Do(func() {
+		os.Stdout = c.orig
+		_ = c.w.Close()
+		<-c.done
+	})
+	return string(c.buf)
 }
 
 const (

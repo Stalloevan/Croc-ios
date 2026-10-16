@@ -23,11 +23,34 @@ enum CrocBridge {
         if let err { throw err }
     }
 
-    /// Receives files into `destination`. Blocks until the transfer ends, so call it off the main thread.
-    static func receive(code: String, relay: String, relayPassword: String, destination: URL) throws {
+    /// Sends a text message. Blocks until the transfer ends, so call it off the main thread.
+    static func sendText(_ text: String, code: String, relay: String, relayPassword: String) throws {
         var err: NSError?
-        CrocmobileReceive(code, relay, relayPassword, destination.path, &err)
+        CrocmobileSendText(text, code, relay, relayPassword, &err)
         if let err { throw err }
+    }
+
+    /// Receives into `destination`. Returns the message when the sender sent text, otherwise
+    /// nil (files were saved). Blocks until the transfer ends, so call it off the main thread.
+    static func receive(code: String, relay: String, relayPassword: String, destination: URL) throws -> String? {
+        var err: NSError?
+        let text = CrocmobileReceive(code, relay, relayPassword, destination.path, &err)
+        if let err { throw err }
+        return text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : text
+    }
+
+    static func isValidSSHCode(_ code: String) -> Bool {
+        CrocmobileValidSSHCode(code)
+    }
+
+    /// Joins a shared terminal. Returns at once; output arrives through `sink`.
+    static func joinSSH(code: String, relay: String, relayPassword: String, cols: Int, rows: Int,
+                        sink: CrocmobileTerminalSinkProtocol) throws -> CrocmobileSSHSession {
+        var err: NSError?
+        let session = CrocmobileJoinSSH(code, relay, relayPassword, cols, rows, sink, &err)
+        if let err { throw err }
+        guard let session else { throw NSError(domain: "croc", code: 1, userInfo: [NSLocalizedDescriptionKey: "Could not join."]) }
+        return session
     }
 
     /// True when the receiver turned the transfer down (not a failure).

@@ -1,80 +1,77 @@
 import SwiftUI
 import UIKit
 
-extension Color {
-    /// The dark navy of the favicon outline; readable on the accent green.
-    static let onAccent = Color(red: 1.0 / 255, green: 20.0 / 255, blue: 60.0 / 255)
-    static let appBackground = Color("AppBackground")
-    static let panel = Color("Panel")
-}
-
-/// One screen: pick Send or Receive at the top, settings live in a sheet.
+/// One screen, laid out like getcroc.com: Send / Receive / SSH tabs, square bordered panels.
 struct ContentView: View {
-    enum Mode: String, CaseIterable, Identifiable {
-        case send = "Send"
-        case receive = "Receive"
-        var id: String { rawValue }
-        var symbol: String { self == .send ? "square.and.arrow.up" : "square.and.arrow.down" }
+    enum Mode: String, CaseIterable, Hashable {
+        case send = "Send", receive = "Receive", ssh = "SSH"
+        var symbol: String {
+            switch self {
+            case .send: return "square.and.arrow.up"
+            case .receive: return "square.and.arrow.down"
+            case .ssh: return "terminal"
+            }
+        }
     }
+    enum Content: String, CaseIterable, Hashable { case files = "Files", text = "Text" }
 
     @EnvironmentObject private var model: TransferModel
+    @EnvironmentObject private var ssh: SSHController
     @State private var mode: Mode = .send
+    @State private var content: Content = .files
     @State private var showingSettings = false
     @State private var showingPicker = false
     @State private var copied = false
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    ModeSwitch(mode: $mode)
+        ZStack {
+            Color.canvas.ignoresSafeArea()
+            ScrollView {
+                VStack(spacing: 16) {
+                    header
+                    SiteTabs(items: Mode.allCases, selection: $mode, title: { $0.rawValue }, symbol: { $0.symbol })
                         .disabled(model.status.isWorking)
-                }
-                .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets())
-
-                switch mode {
-                case .send: sendSections
-                case .receive: receiveSections
-                }
-
-                StatusSection()
-            }
-            .scrollContentBackground(.hidden)
-            .background(Color.appBackground)
-            .navigationTitle("Croc")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    HStack(spacing: 6) {
-                        Image("CrocMark")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 26, height: 26)
-                            .accessibilityHidden(true)
-                        Text("croc").font(.headline)
+                    switch mode {
+                    case .send: sendPanels
+                    case .receive: receivePanels
+                    case .ssh: SSHJoinPanel()
                     }
+                    StatusPanel()
                 }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { showingSettings = true } label: {
-                        Image(systemName: "gearshape")
-                    }
-                    .accessibilityLabel("Settings")
-                }
+                .padding(16)
             }
-            .sheet(isPresented: $showingSettings) { SettingsSheet() }
-            .sheet(isPresented: $showingPicker) {
-                DocumentPicker(
-                    onPick: { urls in
-                        showingPicker = false
-                        model.addFiles(urls)
-                    },
-                    onCancel: { showingPicker = false }
-                )
-                .ignoresSafeArea()
-            }
+            .scrollDismissesKeyboard(.interactively)
         }
         .fontDesign(.monospaced)
+        .sheet(isPresented: $showingSettings) { SettingsSheet() }
+        .sheet(isPresented: $showingPicker) {
+            DocumentPicker(
+                onPick: { urls in
+                    showingPicker = false
+                    model.addFiles(urls)
+                },
+                onCancel: { showingPicker = false }
+            )
+            .ignoresSafeArea()
+        }
+        .fullScreenCover(isPresented: $ssh.showTerminal) { SSHTerminalView() }
+    }
+
+    private var header: some View {
+        HStack(spacing: 10) {
+            Image("CrocMark")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 30, height: 30)
+                .accessibilityHidden(true)
+            Text("croc").font(.title2.weight(.bold))
+            Spacer()
+            Button { showingSettings = true } label: {
+                Image(systemName: "gearshape").frame(width: 24, height: 24)
+            }
+            .buttonStyle(OutlineButtonStyle())
+            .accessibilityLabel("Settings")
+        }
     }
 
     private func copyCode() {
@@ -90,162 +87,163 @@ struct ContentView: View {
 
     // MARK: Send
 
-    @ViewBuilder private var sendSections: some View {
-        Section {
+    @ViewBuilder private var sendPanels: some View {
+        Panel(title: "Code") {
             Text(model.sendCode.isEmpty ? "—" : model.sendCode)
-                .font(.system(.title2, design: .monospaced, weight: .semibold))
+                .font(.system(.title3, design: .monospaced, weight: .semibold))
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.vertical, 6)
-
-            HStack {
+                .padding(.vertical, 4)
+            HStack(spacing: 8) {
                 Button { copyCode() } label: {
-                    Label(copied ? "Copied" : "Copy",
-                          systemImage: copied ? "checkmark" : "doc.on.doc")
-                        .foregroundStyle(copied ? Color.green : Color.accentColor)
+                    Label(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc")
+                        .frame(maxWidth: .infinity)
                         .contentTransition(.symbolEffect(.replace))
                 }
+                .buttonStyle(OutlineButtonStyle(tint: copied ? .accentColor : .ink))
                 .accessibilityLabel(copied ? "Code copied" : "Copy code")
-                Spacer()
                 ShareLink(item: model.sendCode) {
-                    Label("Share", systemImage: "square.and.arrow.up")
+                    Label("Share", systemImage: "square.and.arrow.up").frame(maxWidth: .infinity)
                 }
-                Spacer()
+                .buttonStyle(OutlineButtonStyle())
                 Button { model.regenerateCode() } label: {
-                    Label("New", systemImage: "arrow.clockwise")
+                    Label("New", systemImage: "arrow.clockwise").frame(maxWidth: .infinity)
                 }
+                .buttonStyle(OutlineButtonStyle())
             }
-            .buttonStyle(.borderless)
-            .labelStyle(.titleAndIcon)
             .disabled(model.status.isWorking || model.sendCode.isEmpty)
-        } header: {
-            Text("Code").tracking(1.5)
-        } footer: {
             Text("Give this code to the receiver and keep Croc open until the transfer finishes.")
+                .font(.footnote).foregroundStyle(Color.muted)
         }
-        .listRowBackground(Color.panel)
 
-        Section {
-            ForEach(model.selectedFiles, id: \.self) { url in
-                Label(url.lastPathComponent, systemImage: "doc")
-            }
-            .onDelete { model.removeFiles(at: $0) }
-
-            Button { showingPicker = true } label: {
-                VStack(spacing: 6) {
-                    Text(model.selectedFiles.isEmpty ? "Choose files" : "Add more files")
-                        .font(.headline)
-                    Text("Select from this device")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, minHeight: 92)
-                .overlay(
-                    Rectangle()
-                        .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
-                        .foregroundStyle(.secondary)
-                )
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
+        SiteTabs(items: Content.allCases, selection: $content, title: { $0.rawValue })
             .disabled(model.status.isWorking)
-            .listRowSeparator(.hidden)
-        } header: {
-            Text("Files").tracking(1.5)
-        }
-        .listRowBackground(Color.panel)
 
-        Section {
+        if content == .files {
+            Panel(title: "Files") {
+                ForEach(model.selectedFiles, id: \.self) { url in
+                    HStack(spacing: 10) {
+                        Image(systemName: "doc").foregroundStyle(Color.muted)
+                        Text(url.lastPathComponent).lineLimit(1).truncationMode(.middle)
+                        Spacer()
+                        Button { remove(url) } label: {
+                            Image(systemName: "xmark").frame(width: 28, height: 28)
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Color.muted)
+                        .disabled(model.status.isWorking)
+                        .accessibilityLabel("Remove \(url.lastPathComponent)")
+                    }
+                }
+                Button { showingPicker = true } label: {
+                    VStack(spacing: 6) {
+                        Text(model.selectedFiles.isEmpty ? "Choose files" : "Add more files").font(.headline)
+                        Text("Select from this device").font(.footnote).foregroundStyle(Color.muted)
+                    }
+                    .foregroundStyle(Color.ink)
+                    .frame(maxWidth: .infinity, minHeight: 92)
+                    .overlay(
+                        Rectangle()
+                            .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
+                            .foregroundStyle(Color.muted)
+                    )
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(model.status.isWorking)
+            }
             Button { model.sendSelectedFiles() } label: {
                 ActionLabel(title: "Send", busyTitle: "Sending…", systemImage: "square.and.arrow.up", busy: model.status.isWorking)
             }
-            .buttonStyle(ActionButtonStyle())
+            .buttonStyle(PrimaryButtonStyle())
             .disabled(model.status.isWorking || model.selectedFiles.isEmpty)
+        } else {
+            Panel(title: "Message") {
+                TextEditor(text: $model.textToSend)
+                    .font(.system(.body, design: .monospaced))
+                    .scrollContentBackground(.hidden)
+                    .frame(minHeight: 140)
+                    .padding(8)
+                    .background(Color.canvas)
+                    .overlay(Rectangle().stroke(Color.softBorder, lineWidth: 1))
+                    .textInputAutocapitalization(.never)
+                    .disabled(model.status.isWorking)
+                Text("Up to 1 MiB. The receiver sees it on screen; nothing is saved to a file.")
+                    .font(.footnote).foregroundStyle(Color.muted)
+            }
+            Button { model.sendTypedText() } label: {
+                ActionLabel(title: "Send text", busyTitle: "Sending…", systemImage: "text.bubble", busy: model.status.isWorking)
+            }
+            .buttonStyle(PrimaryButtonStyle())
+            .disabled(model.status.isWorking || model.textToSend.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
-        .listRowBackground(Color.clear)
-        .listRowInsets(EdgeInsets())
+    }
+
+    private func remove(_ url: URL) {
+        if let index = model.selectedFiles.firstIndex(of: url) {
+            model.removeFiles(at: IndexSet(integer: index))
+        }
     }
 
     // MARK: Receive
 
-    @ViewBuilder private var receiveSections: some View {
-        Section {
-            HStack {
+    @ViewBuilder private var receivePanels: some View {
+        Panel(title: "Code") {
+            HStack(spacing: 8) {
                 TextField("e.g. mouth-ripen-baker", text: $model.receiveCode)
                     .font(.system(.body, design: .monospaced))
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
                     .submitLabel(.go)
                     .onSubmit { model.receiveFiles() }
+                    .siteField()
                 Button {
                     if let text = UIPasteboard.general.string { model.receiveCode = text }
                 } label: {
-                    Image(systemName: "doc.on.clipboard")
+                    Image(systemName: "doc.on.clipboard").frame(width: 24, height: 24)
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(OutlineButtonStyle())
+                .frame(minHeight: 46)
                 .accessibilityLabel("Paste code")
             }
-        } header: {
-            Text("Code").tracking(1.5)
-        } footer: {
-            Text("Type or paste the code the sender sees. Files land in Files → Croc → Received.")
+            Text("Type or paste the code the sender sees. Files land in Files → Croc → Received; text appears below.")
+                .font(.footnote).foregroundStyle(Color.muted)
         }
-        .listRowBackground(Color.panel)
+        Button { model.receiveFiles() } label: {
+            ActionLabel(title: "Receive", busyTitle: "Receiving…", systemImage: "square.and.arrow.down", busy: model.status.isWorking)
+        }
+        .buttonStyle(PrimaryButtonStyle())
+        .disabled(model.status.isWorking || model.receiveCode.trimmingCharacters(in: .whitespaces).isEmpty)
 
-        Section {
-            Button { model.receiveFiles() } label: {
-                ActionLabel(title: "Receive", busyTitle: "Receiving…", systemImage: "square.and.arrow.down", busy: model.status.isWorking)
+        if let text = model.receivedText {
+            Panel(title: "Message received") {
+                Text(text)
+                    .font(.system(.body, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                HStack(spacing: 8) {
+                    Button {
+                        UIPasteboard.general.string = text
+                        UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    } label: {
+                        Label("Copy", systemImage: "doc.on.doc").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(OutlineButtonStyle())
+                    ShareLink(item: text) {
+                        Label("Share", systemImage: "square.and.arrow.up").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(OutlineButtonStyle())
+                    Button { model.clearStatus() } label: {
+                        Label("Dismiss", systemImage: "xmark").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(OutlineButtonStyle())
+                }
             }
-            .buttonStyle(ActionButtonStyle())
-            .disabled(model.status.isWorking || model.receiveCode.trimmingCharacters(in: .whitespaces).isEmpty)
         }
-        .listRowBackground(Color.clear)
-        .listRowInsets(EdgeInsets())
     }
 }
 
 // MARK: - Pieces
 
-/// Send / Receive switch in the website's style: two flat halves, the selected one inverted.
-struct ModeSwitch: View {
-    @Binding var mode: ContentView.Mode
-
-    var body: some View {
-        HStack(spacing: 0) {
-            ForEach(ContentView.Mode.allCases) { item in
-                let selected = item == mode
-                Button { mode = item } label: {
-                    Label(item.rawValue, systemImage: item.symbol)
-                        .font(.headline)
-                        .frame(maxWidth: .infinity, minHeight: 50)
-                        .foregroundStyle(selected ? Color.panel : Color.secondary)
-                        .background(selected ? Color.primary : Color.clear)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(selected ? .isSelected : [])
-            }
-        }
-        .overlay(Rectangle().stroke(Color.primary, lineWidth: 1))
-        .background(Color.panel)
-    }
-}
-
-/// Primary action: accent green with the favicon's navy text.
-struct ActionButtonStyle: ButtonStyle {
-    @Environment(\.isEnabled) private var isEnabled
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.headline)
-            .foregroundStyle(Color.onAccent)
-            .frame(maxWidth: .infinity, minHeight: 52)
-            .background(Color.accentColor.opacity(isEnabled ? (configuration.isPressed ? 0.8 : 1) : 0.35))
-            .clipShape(RoundedRectangle(cornerRadius: 4))
-    }
-}
-
-/// Button label. It never shows a spinner: the status row owns the only one.
+/// Button label. It never shows a spinner: the status panel owns the only one.
 struct ActionLabel: View {
     let title: String
     let busyTitle: String
@@ -262,7 +260,7 @@ struct ActionLabel: View {
 }
 
 /// Progress and result of the current transfer.
-struct StatusSection: View {
+struct StatusPanel: View {
     @EnvironmentObject private var model: TransferModel
 
     var body: some View {
@@ -271,42 +269,38 @@ struct StatusSection: View {
             EmptyView()
         case .working(let message):
             // The one and only spinner on screen.
-            Section {
+            Panel {
                 HStack(spacing: 12) {
                     ProgressView()
                     Text(message)
                 }
             }
-            .listRowBackground(Color.panel)
         case .success(let message):
-            Section {
-                Label(message, systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-                if model.canShowReceived {
-                    Button { model.showReceivedFolder() } label: {
-                        Label("Show in Files", systemImage: "folder")
+            Panel {
+                Label(message, systemImage: "checkmark.square.fill").foregroundStyle(Color.accentColor)
+                HStack(spacing: 8) {
+                    if model.canShowReceived {
+                        Button { model.showReceivedFolder() } label: {
+                            Label("Show in Files", systemImage: "folder").frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(OutlineButtonStyle())
                     }
+                    Button { model.clearStatus() } label: { Text("Dismiss").frame(maxWidth: .infinity) }
+                        .buttonStyle(OutlineButtonStyle())
                 }
-                Button("Dismiss") { model.clearStatus() }
             }
-            .listRowBackground(Color.panel)
         case .notice(let message):
-            Section {
-                Label {
-                    Text(message)
-                } icon: {
-                    Image(systemName: "hand.raised.fill").foregroundStyle(.orange)
-                }
-                Button("Dismiss") { model.clearStatus() }
+            Panel {
+                Label(message, systemImage: "hand.raised.fill")
+                Button { model.clearStatus() } label: { Text("Dismiss").frame(maxWidth: .infinity) }
+                    .buttonStyle(OutlineButtonStyle())
             }
-            .listRowBackground(Color.panel)
         case .failure(let message):
-            Section {
+            Panel {
                 Label(message, systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.red)
-                Button("Dismiss") { model.clearStatus() }
+                Button { model.clearStatus() } label: { Text("Dismiss").frame(maxWidth: .infinity) }
+                    .buttonStyle(OutlineButtonStyle())
             }
-            .listRowBackground(Color.panel)
         }
     }
 }
@@ -317,46 +311,39 @@ struct SettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    TextField("Automatic (public relays)", text: $model.relay)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .keyboardType(.URL)
-                    SecureField("Password (optional)", text: $model.relayPassword)
-                } header: {
-                    Text("Relay").tracking(1.5)
-                } footer: {
-                    Text("Leave the relay empty to use the public croc relays, chosen automatically from the code like other croc apps. Set host:port only to use your own relay on both sides.")
+        ZStack {
+            Color.canvas.ignoresSafeArea()
+            ScrollView {
+                VStack(spacing: 16) {
+                    HStack {
+                        Text("Settings").font(.title2.weight(.bold))
+                        Spacer()
+                        Button("Done") { dismiss() }.buttonStyle(OutlineButtonStyle())
+                    }
+                    Panel(title: "Relay") {
+                        TextField("Automatic (public relays)", text: $model.relay)
+                            .keyboardType(.URL)
+                            .siteField()
+                        SecureField("Password (optional)", text: $model.relayPassword)
+                            .siteField()
+                        Text("Leave the relay empty to use the public croc relays, chosen automatically from the code like other croc apps. Set host:port only to use your own relay on both sides.")
+                            .font(.footnote).foregroundStyle(Color.muted)
+                    }
+                    Panel(title: "Background") {
+                        SiteCheckbox(title: "Keep running in background", isOn: $model.keepRunning)
+                        Text("Lets a transfer carry on while you switch to another app, such as a browser, by playing inaudible audio. Uses more battery while a transfer is running.")
+                            .font(.footnote).foregroundStyle(Color.muted)
+                    }
+                    Button { model.resetSettings() } label: {
+                        Text("Back to automatic").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(OutlineButtonStyle())
                 }
-                .listRowBackground(Color.panel)
-
-                Section {
-                    Toggle("Keep running in background", isOn: $model.keepRunning)
-                } header: {
-                    Text("Background").tracking(1.5)
-                } footer: {
-                    Text("Lets a transfer carry on while you switch to another app, such as a browser, by playing inaudible audio. Uses more battery while a transfer is running.")
-                }
-                .listRowBackground(Color.panel)
-
-                Section {
-                    Button("Back to automatic") { model.resetSettings() }
-                }
-                .listRowBackground(Color.panel)
-            }
-            .scrollContentBackground(.hidden)
-            .background(Color.appBackground)
-            .navigationTitle("Settings")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
-                }
+                .padding(16)
             }
         }
         .fontDesign(.monospaced)
+        .presentationBackground(Color.canvas)
         .presentationDetents([.medium, .large])
     }
 }

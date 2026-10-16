@@ -97,10 +97,55 @@ func TestLoopback(t *testing.T) {
 	time.Sleep(2 * time.Second)
 
 	recvErr := make(chan error, 1)
-	go func() { recvErr <- Receive(code, testRelay, "", dst) }()
+	go func() { _, err := Receive(code, testRelay, "", dst); recvErr <- err }()
 	waitErr(t, recvErr, "receive")
 	waitErr(t, sendErr, "send")
 	checkFile(t, dst, "loop.bin", data)
+}
+
+// App sends text, app receives it as text (nothing saved).
+func TestTextLoopback(t *testing.T) {
+	startRelay(t)
+	dst := t.TempDir()
+	code, err := GenerateCode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const message = "hello from the app\nsecond line"
+	sendErr := make(chan error, 1)
+	go func() { sendErr <- SendText(message, code, testRelay, "") }()
+	time.Sleep(2 * time.Second)
+
+	type result struct {
+		text string
+		err  error
+	}
+	got := make(chan result, 1)
+	go func() {
+		text, err := Receive(code, testRelay, "", dst)
+		got <- result{text, err}
+	}()
+	select {
+	case r := <-got:
+		if r.err != nil {
+			t.Fatal(r.err)
+		}
+		if r.text != message {
+			t.Fatalf("got %q, want %q", r.text, message)
+		}
+	case <-time.After(60 * time.Second):
+		t.Fatal("timed out receiving text")
+	}
+	waitErr(t, sendErr, "send")
+	if entries, _ := os.ReadDir(dst); len(entries) != 0 {
+		t.Fatalf("text transfer left files behind: %v", entries)
+	}
+}
+
+func TestSSHCodeValidation(t *testing.T) {
+	if ValidSSHCode("mouth-ripen-baker") {
+		t.Fatal("a three-word file code must not be a valid SSH code")
+	}
 }
 
 // The relay must follow the code, like the croc CLI in public relay mode.
@@ -225,7 +270,7 @@ func TestCLISendsToApp(t *testing.T) {
 	time.Sleep(3 * time.Second)
 
 	recvErr := make(chan error, 1)
-	go func() { recvErr <- Receive(code, testRelay, "", dst) }()
+	go func() { _, err := Receive(code, testRelay, "", dst); recvErr <- err }()
 	waitErr(t, recvErr, "receive")
 	select {
 	case <-done:

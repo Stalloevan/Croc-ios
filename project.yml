@@ -4,6 +4,10 @@ options:
   bundleIdPrefix: com.stalloevan
   deploymentTarget:
     iOS: "17.0"
+packages:
+  SwiftTerm:
+    url: https://github.com/migueldeicaza/SwiftTerm
+    from: 1.2.0
 targets:
   CrocApp:
     type: application
@@ -11,6 +15,7 @@ targets:
     sources:
       - CrocApp
     dependencies:
+      - package: SwiftTerm
       - framework: Frameworks/Croc.xcframework
         embed: true
     info:
@@ -19,7 +24,8 @@ targets:
         CFBundleDisplayName: Croc
         CFBundleShortVersionString: "0.1.0"
         CFBundleVersion: "1"
-        UILaunchScreen: {}
+        UILaunchScreen:
+          UIColorName: Canvas
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
         ITSAppUsesNonExemptEncryption: false

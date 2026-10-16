@@ -80,3 +80,7 @@ sending to, and use it once.
 ## Credits
 
 Transfer engine: [schollz/croc](https://github.com/schollz/croc) (MIT).
+
+## Modes
+
+The single screen mirrors getcroc.com: **Send** (Files or Text), **Receive** (files are saved; a text message is shown on screen) and **SSH** (join a shared `croc ssh` terminal with the host's six-word code, through the relay).

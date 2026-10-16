@@ -24,6 +24,9 @@ final class TransferModel: ObservableObject {
     @Published var sendCode: String = ""
     @Published var receiveCode: String = ""
     @Published var canShowReceived = false
+    @Published var textToSend: String = ""
+    /// A message received from the sender instead of files.
+    @Published var receivedText: String?
     /// Remembered between launches. The password is kept for the session only.
     @Published var relay: String {
         didSet { UserDefaults.standard.set(relay, forKey: "relay") }
@@ -131,6 +134,37 @@ final class TransferModel: ObservableObject {
         }
     }
 
+    func sendTypedText() {
+        guard !status.isWorking else { return }
+        let text = textToSend
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            status = .failure("Type a message to send.")
+            return
+        }
+        guard !sendCode.isEmpty else {
+            status = .failure("Create a code first.")
+            return
+        }
+        let code = sendCode
+        let relayAddress = self.relay
+        let password = relayPassword
+        status = .working("Waiting for the receiver…")
+        keepAlive.start(useAudio: keepRunning)
+
+        Task.detached(priority: .userInitiated) {
+            do {
+                try CrocBridge.sendText(text, code: code, relay: relayAddress, relayPassword: password)
+                await self.finish(.success("Message sent."), received: false, clearText: true)
+            } catch {
+                if CrocBridge.isDeclined(error) {
+                    await self.finish(.notice("The receiver declined the transfer."), received: false)
+                } else {
+                    await self.finish(.failure(error.localizedDescription), received: false)
+                }
+            }
+        }
+    }
+
     func receiveFiles() {
         guard !status.isWorking else { return }
         let code = receiveCode.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -143,12 +177,17 @@ final class TransferModel: ObservableObject {
         let password = relayPassword
         let destination = receiveFolder
         status = .working("Connecting to the sender…")
+        receivedText = nil
         keepAlive.start(useAudio: keepRunning)
 
         Task.detached(priority: .userInitiated) {
             do {
-                try CrocBridge.receive(code: code, relay: relayAddress, relayPassword: password, destination: destination)
-                await self.finish(.success("Files saved to Files → Croc → Received."), received: true)
+                let text = try CrocBridge.receive(code: code, relay: relayAddress, relayPassword: password, destination: destination)
+                if let text {
+                    await self.finishText(text)
+                } else {
+                    await self.finish(.success("Files saved to Files → Croc → Received."), received: true)
+                }
             } catch {
                 await self.finish(.failure(error.localizedDescription), received: false)
             }
@@ -158,17 +197,29 @@ final class TransferModel: ObservableObject {
     func clearStatus() {
         if !status.isWorking {
             status = .idle
+            receivedText = nil
             canShowReceived = false
         }
     }
 
-    private func finish(_ result: Status, received: Bool) {
+    private func finishText(_ text: String) {
+        keepAlive.stop()
+        receivedText = text
+        status = .idle
+        canShowReceived = false
+    }
+
+    private func finish(_ result: Status, received: Bool, clearText: Bool = false) {
         keepAlive.stop()
         status = result
         canShowReceived = received
         if case .success = result, !received {
-            selectedFiles.forEach { try? FileManager.default.removeItem(at: $0) }
-            selectedFiles.removeAll()
+            if clearText {
+                textToSend = ""
+            } else {
+                selectedFiles.forEach { try? FileManager.default.removeItem(at: $0) }
+                selectedFiles.removeAll()
+            }
             regenerateCode()
         } else if case .notice = result {
             regenerateCode()
