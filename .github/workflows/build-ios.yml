@@ -142,6 +142,7 @@ jobs:
             -archivePath build/CrocApp.xcarchive \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
             COMPILER_INDEX_STORE_ENABLE=NO \
+            -skipPackagePluginValidation -skipMacroValidation \
             > build/xcodebuild.log 2>&1 || {
             msg=$({ grep -iE "error|fatal|failed" build/xcodebuild.log | head -n 20; echo "--- tail ---"; tail -n 15 build/xcodebuild.log; } | cut -c1-300 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
             echo "::error title=xcodebuild failed::${msg}"
